@@ -19,6 +19,8 @@ class ChannelController extends Controller
         $missingChannelNames = array_diff($channelNames, $existingChannels->keys()->toArray());
         $client = new Client();
 
+        if (count($missingChannelNames) === 0) info('no new missing Channel Names');
+
         foreach ($missingChannelNames as $channelName) {
             Log::info('Processing channel name:', [$channelName]);
 
