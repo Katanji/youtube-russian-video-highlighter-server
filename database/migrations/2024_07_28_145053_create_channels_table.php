@@ -10,8 +10,9 @@ return new class extends Migration
     {
         Schema::create('channels', function (Blueprint $table) {
             $table->id();
+            $table->string('channel_name')->unique();
             $table->string('channel_id')->unique();
-            $table->string('country')->nullable();
+            $table->string('country_code')->nullable();
             $table->timestamps();
         });
     }

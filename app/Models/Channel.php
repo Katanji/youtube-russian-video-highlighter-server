@@ -14,4 +14,6 @@ use Illuminate\Database\Eloquent\Model;
 class Channel extends Model
 {
     use HasFactory;
+
+    protected $fillable = ['channel_id', 'channel_name', 'country_code'];
 }
