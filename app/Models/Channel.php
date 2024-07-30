@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * @method static updateOrCreate(array $array, null[] $array1)
  * @method static whereIn(string $string, array $channelIds)
+ * @method static create(array $array)
  */
 class Channel extends Model
 {

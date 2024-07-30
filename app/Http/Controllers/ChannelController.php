@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\CheckChannelsRequest;
 use App\Models\Channel;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 
@@ -74,12 +75,14 @@ class ChannelController extends Controller
                         Log::error('No channel info found:', ['channelId' => $channelId]);
                     }
                 } else {
-                    Log::error('Channel not found:', ['channelName' => $channelName]);
+                    Log::info('Channel not found:', ['channelName' => $channelName]);
+                    Channel::create(['channel_name' => $channelName, 'channel_id' => $channelName, 'country_code' => null]);
                 }
 
                 usleep(100000); // 100ms delay
             } catch (\Exception $e) {
                 Log::error('Error processing channel:', ['channelName' => $channelName, 'error' => $e->getMessage()]);
+            } catch (GuzzleException $e) {
             }
         }
 
