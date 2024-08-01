@@ -21,12 +21,13 @@ class ChannelController extends Controller
 
     public function checkChannels(CheckChannelsRequest $request): JsonResponse
     {
-        if ($this->areAllKeysExhausted()) {
-            return response()->json(['error' => 'All API keys are currently exhausted'], 429);
-        }
-
         $channelNames = $request->channel_ids;
         $existingChannels = Channel::whereIn('channel_name', $channelNames)->get()->keyBy('channel_name');
+
+        if ($this->areAllKeysExhausted()) {
+            return response()->json($existingChannels);
+        }
+
         $missingChannelNames = array_diff($channelNames, $existingChannels->keys()->toArray());
         $client = new Client();
 
