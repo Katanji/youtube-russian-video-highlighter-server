@@ -88,13 +88,22 @@ class ChannelController extends Controller
                 $item = $data['items'][0];
                 $country = $item['brandingSettings']['channel']['country'] ?? null;
 
-                $channel = Channel::updateOrCreate(
-                    ['channel_name' => $channelName],
-                    [
-                        'channel_id' => $channelId,
+                $existingChannel = Channel::where('channel_id', $channelId)->first();
+                if ($existingChannel && $existingChannel->channel_name === $existingChannel->channel_id) {
+                    $existingChannel->update([
+                        'channel_name' => $channelName,
                         'country_code' => $country
-                    ]
-                );
+                    ]);
+                    $channel = $existingChannel;
+                } else {
+                    $channel = Channel::updateOrCreate(
+                        ['channel_name' => $channelName],
+                        [
+                            'channel_id' => $channelId,
+                            'country_code' => $country
+                        ]
+                    );
+                }
 
                 $existingChannels->put($channelName, $channel);
             } else {
