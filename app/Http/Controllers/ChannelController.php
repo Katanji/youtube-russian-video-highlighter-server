@@ -58,6 +58,12 @@ class ChannelController extends Controller
 
     private function processChannel(string $channelName, string $apiKey, &$existingChannels): void
     {
+        $existingChannel = Channel::where('channel_id', $channelName)->first();
+        if ($existingChannel) {
+            $existingChannels->put($channelName, $existingChannel);
+            return;
+        }
+
         $searchUrl = 'https://www.googleapis.com/youtube/v3/search';
         $searchResponse = $this->client->get($searchUrl, [
             'query' => [
