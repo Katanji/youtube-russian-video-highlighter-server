@@ -25,7 +25,10 @@ class YouTubeApiKey extends Model
 
     public function scopeAvailable($query)
     {
-        return $query->where('expired_at', '<', now('UTC')->startOfDay());
+        return $query->where(function($q) {
+            $q->whereNull('expired_at')
+              ->orWhere('expired_at', '<', now('America/Los_Angeles')->startOfDay()->utc());
+        });
     }
 
     public function markAsExhausted(): void

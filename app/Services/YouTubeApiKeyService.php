@@ -42,7 +42,7 @@ class YouTubeApiKeyService
 
     private function markAllKeysExhausted(): void
     {
-        $tomorrowStart = Carbon::now('UTC')->addDay()->startOfDay();
-        Cache::put(self::ALL_KEYS_EXHAUSTED, true, $tomorrowStart);
+        $nextYouTubeReset = Carbon::now('America/Los_Angeles')->addDay()->startOfDay();
+        Cache::put(self::ALL_KEYS_EXHAUSTED, true, $nextYouTubeReset);
     }
 }
