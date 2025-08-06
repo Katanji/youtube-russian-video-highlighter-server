@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\CheckChannelsRequest;
 use App\Models\Channel;
 use App\Services\YouTubeApiKeyService;
+use App\Services\ApifyService;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Http\JsonResponse;
@@ -13,11 +14,13 @@ use Illuminate\Support\Facades\Log;
 class ChannelController extends Controller
 {
     private YouTubeApiKeyService $youtubeApiKeyService;
+    private ApifyService $apifyService;
     private Client $client;
 
-    public function __construct(YouTubeApiKeyService $youtubeApiKeyService, Client $client)
+    public function __construct(YouTubeApiKeyService $youtubeApiKeyService, ApifyService $apifyService, Client $client)
     {
         $this->youtubeApiKeyService = $youtubeApiKeyService;
+        $this->apifyService = $apifyService;
         $this->client = $client;
     }
 
@@ -64,21 +67,79 @@ class ChannelController extends Controller
             return;
         }
 
-        $searchUrl = 'https://www.googleapis.com/youtube/v3/search';
-        $searchResponse = $this->client->get($searchUrl, [
-            'query' => [
-                'part' => 'snippet',
-                'type' => 'channel',
-                'q' => $channelName,
-                'key' => $apiKey
-            ]
-        ]);
+        // Try Apify first to save YouTube API keys
+        if ($this->apifyService->isAvailable()) {
+            $apifyData = $this->apifyService->getChannelInfo($channelName);
+            
+            if ($apifyData && $apifyData['channel_id']) {
+                Log::info('Channel info obtained from Apify', ['channel' => $channelName]);
+                $this->saveChannelFromApify($channelName, $apifyData, $existingChannels);
+                return;
+            }
+        }
 
-        $searchData = json_decode($searchResponse->getBody()->getContents(), true);
+        // Fallback to YouTube API if Apify failed
+        $this->processChannelViaYouTubeApi($channelName, $apiKey, $existingChannels);
+    }
 
-        if (!empty($searchData['items'])) {
-            $channelId = $searchData['items'][0]['id']['channelId'];
+    private function saveChannelFromApify(string $channelName, array $apifyData, &$existingChannels): void
+    {
+        $existingChannel = Channel::where('channel_id', $apifyData['channel_id'])->first();
+        
+        if ($existingChannel && $existingChannel->channel_name === $existingChannel->channel_id) {
+            $existingChannel->update([
+                'channel_name' => $channelName,
+                'country_code' => $apifyData['country_code'] ?? null
+            ]);
+            $channel = $existingChannel;
+        } else {
+            $channel = Channel::updateOrCreate(
+                ['channel_name' => $channelName],
+                [
+                    'channel_id' => $apifyData['channel_id'],
+                    'country_code' => $apifyData['country_code'] ?? null
+                ]
+            );
+        }
+        
+        $existingChannels->put($channelName, $channel);
+    }
 
+    /**
+     * Check if string is a YouTube Channel ID
+     */
+    private function isChannelId(string $identifier): bool
+    {
+        return preg_match('/^UC[a-zA-Z0-9_-]{22}$/', $identifier) === 1;
+    }
+
+    /**
+     * Process channel via YouTube API (fallback method)
+     */
+    private function processChannelViaYouTubeApi(string $channelName, string $apiKey, &$existingChannels): void
+    {
+        $channelId = null;
+        if ($this->isChannelId($channelName)) {
+            $channelId = $channelName;
+        } else {
+            $searchUrl = 'https://www.googleapis.com/youtube/v3/search';
+            $searchResponse = $this->client->get($searchUrl, [
+                'query' => [
+                    'part' => 'id',
+                    'type' => 'channel',
+                    'q' => $channelName,
+                    'key' => $apiKey
+                ]
+            ]);
+
+            $searchData = json_decode($searchResponse->getBody()->getContents(), true);
+
+            if (!empty($searchData['items'])) {
+                $channelId = $searchData['items'][0]['id']['channelId'];
+            }
+        }
+
+        if ($channelId) {
             $url = 'https://www.googleapis.com/youtube/v3/channels';
             $response = $this->client->get($url, [
                 'query' => [
