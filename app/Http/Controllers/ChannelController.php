@@ -28,32 +28,28 @@ class ChannelController extends Controller
     {
         $channelNames = $request->channel_ids;
         $existingChannels = Channel::whereIn('channel_name', $channelNames)->get()->keyBy('channel_name');
+        $missingChannelNames = array_diff($channelNames, $existingChannels->keys()->toArray());
 
-        if (!$this->youtubeApiKeyService->areAllKeysExhausted()) {
-            $missingChannelNames = array_diff($channelNames, $existingChannels->keys()->toArray());
-
-            foreach ($missingChannelNames as $channelName) {
+        foreach ($missingChannelNames as $channelName) {
+            $apiKey = null;
+            
+            // Try to get YouTube API key if available
+            if (!$this->youtubeApiKeyService->areAllKeysExhausted()) {
                 $apiKey = $this->youtubeApiKeyService->getAvailableApiKey();
-                if (!$apiKey) {
-                    Log::warning('All API keys are currently exhausted. Waiting for reset.');
-                    break;
-                }
-
-                try {
-                    $this->processChannel($channelName, $apiKey, $existingChannels);
-                } catch (\Exception $e) {
-                    if ($e instanceof GuzzleException && $e->getCode() == 403) {
-                        $this->youtubeApiKeyService->markKeyAsExhausted($apiKey);
-                        Log::warning('API key limit reached. Key marked as exhausted.', ['exhausted_key' => $apiKey]);
-                    } else {
-                        Log::error('Error processing channel:', ['channelName' => $channelName, 'error' => $e->getMessage()]);
-                    }
-                }
-
-                usleep(100000); // 100ms delay
             }
-        } else {
-            Log::info('All API keys are exhausted. Skipping API calls.');
+
+            try {
+                $this->processChannel($channelName, $apiKey, $existingChannels);
+            } catch (\Exception $e) {
+                if ($e instanceof GuzzleException && $e->getCode() == 403) {
+                    $this->youtubeApiKeyService->markKeyAsExhausted($apiKey);
+                    Log::warning('API key limit reached. Key marked as exhausted.', ['exhausted_key' => $apiKey]);
+                } else {
+                    Log::error('Error processing channel:', ['channelName' => $channelName, 'error' => $e->getMessage()]);
+                }
+            }
+
+            usleep(100000); // 100ms delay
         }
 
         return response()->json($existingChannels);
@@ -67,19 +63,33 @@ class ChannelController extends Controller
             return;
         }
 
-        // Try Apify first to save YouTube API keys
+        // Try YouTube API first (free)
+        if (!empty($apiKey)) {
+            try {
+                $this->processChannelViaYouTubeApi($channelName, $apiKey, $existingChannels);
+                return;
+            } catch (\Exception $e) {
+                Log::warning('YouTube API failed, trying Apify fallback', [
+                    'channel' => $channelName,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
+        // Fallback to Apify if YouTube API failed or no keys available
         if ($this->apifyService->isAvailable()) {
             $apifyData = $this->apifyService->getChannelInfo($channelName);
             
             if ($apifyData && $apifyData['channel_id']) {
-                Log::info('Channel info obtained from Apify', ['channel' => $channelName]);
+                Log::info('Channel info obtained from Apify (fallback)', ['channel' => $channelName]);
                 $this->saveChannelFromApify($channelName, $apifyData, $existingChannels);
                 return;
             }
         }
 
-        // Fallback to YouTube API if Apify failed
-        $this->processChannelViaYouTubeApi($channelName, $apiKey, $existingChannels);
+        Log::warning('Failed to get channel info from both YouTube API and Apify', [
+            'channel' => $channelName
+        ]);
     }
 
     private function saveChannelFromApify(string $channelName, array $apifyData, &$existingChannels): void
