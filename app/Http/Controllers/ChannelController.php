@@ -94,23 +94,14 @@ class ChannelController extends Controller
 
     private function saveChannelFromApify(string $channelName, array $apifyData, &$existingChannels): void
     {
-        $existingChannel = Channel::where('channel_id', $apifyData['channel_id'])->first();
-        
-        if ($existingChannel && $existingChannel->channel_name === $existingChannel->channel_id) {
-            $existingChannel->update([
+        // Always use channel_id as primary key to avoid duplicate key conflicts
+        $channel = Channel::updateOrCreate(
+            ['channel_id' => $apifyData['channel_id']],
+            [
                 'channel_name' => $channelName,
                 'country_code' => $apifyData['country_code'] ?? null
-            ]);
-            $channel = $existingChannel;
-        } else {
-            $channel = Channel::updateOrCreate(
-                ['channel_name' => $channelName],
-                [
-                    'channel_id' => $apifyData['channel_id'],
-                    'country_code' => $apifyData['country_code'] ?? null
-                ]
-            );
-        }
+            ]
+        );
         
         $existingChannels->put($channelName, $channel);
     }
@@ -165,22 +156,14 @@ class ChannelController extends Controller
                 $item = $data['items'][0];
                 $country = $item['brandingSettings']['channel']['country'] ?? null;
 
-                $existingChannel = Channel::where('channel_id', $channelId)->first();
-                if ($existingChannel && $existingChannel->channel_name === $existingChannel->channel_id) {
-                    $existingChannel->update([
+                // Always use channel_id as primary key to avoid duplicate key conflicts
+                $channel = Channel::updateOrCreate(
+                    ['channel_id' => $channelId],
+                    [
                         'channel_name' => $channelName,
                         'country_code' => $country
-                    ]);
-                    $channel = $existingChannel;
-                } else {
-                    $channel = Channel::updateOrCreate(
-                        ['channel_name' => $channelName],
-                        [
-                            'channel_id' => $channelId,
-                            'country_code' => $country
-                        ]
-                    );
-                }
+                    ]
+                );
 
                 $existingChannels->put($channelName, $channel);
             } else {
@@ -188,9 +171,10 @@ class ChannelController extends Controller
             }
         } else {
             Log::info('Channel not found:', ['channelName' => $channelName]);
+            // For not found channels, use channel_name as both name and id
             Channel::updateOrCreate(
-                ['channel_name' => $channelName],
-                ['channel_id' => $channelName, 'country_code' => null]
+                ['channel_id' => $channelName],
+                ['channel_name' => $channelName, 'country_code' => null]
             );
         }
     }
