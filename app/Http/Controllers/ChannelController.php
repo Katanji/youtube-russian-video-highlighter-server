@@ -30,12 +30,21 @@ class ChannelController extends Controller
         $existingChannels = Channel::whereIn('channel_name', $channelNames)->get()->keyBy('channel_name');
         $missingChannelNames = array_diff($channelNames, $existingChannels->keys()->toArray());
 
+        $allKeysExhausted = $this->youtubeApiKeyService->areAllKeysExhausted();
+        if ($allKeysExhausted) {
+            Log::info('All YouTube API keys exhausted, using Apify for all channels');
+        }
+
         foreach ($missingChannelNames as $channelName) {
             $apiKey = null;
             
             // Try to get YouTube API key if available
-            if (!$this->youtubeApiKeyService->areAllKeysExhausted()) {
+            if (!$allKeysExhausted) {
                 $apiKey = $this->youtubeApiKeyService->getAvailableApiKey();
+                if (!$apiKey) {
+                    $allKeysExhausted = true;
+                    Log::info('YouTube API keys exhausted during processing, switching to Apify');
+                }
             }
 
             try {
@@ -43,7 +52,10 @@ class ChannelController extends Controller
             } catch (\Exception $e) {
                 if ($e instanceof GuzzleException && $e->getCode() == 403) {
                     $this->youtubeApiKeyService->markKeyAsExhausted($apiKey);
-                    Log::warning('API key limit reached. Key marked as exhausted.', ['exhausted_key' => $apiKey]);
+                    // Only log key exhaustion once per key, not per channel
+                    if (!str_contains($e->getMessage(), 'exceeded your quota')) {
+                        Log::warning('API key limit reached. Key marked as exhausted.', ['exhausted_key' => $apiKey]);
+                    }
                 } else {
                     Log::error('Error processing channel:', ['channelName' => $channelName, 'error' => $e->getMessage()]);
                 }
@@ -69,10 +81,16 @@ class ChannelController extends Controller
                 $this->processChannelViaYouTubeApi($channelName, $apiKey, $existingChannels);
                 return;
             } catch (\Exception $e) {
-                Log::warning('YouTube API failed, trying Apify fallback', [
-                    'channel' => $channelName,
-                    'error' => $e->getMessage()
-                ]);
+                // Only log quota exceeded once, not for every channel
+                if (str_contains($e->getMessage(), 'exceeded your quota')) {
+                    // Mark key as exhausted to avoid repeated quota errors
+                    $this->youtubeApiKeyService->markKeyAsExhausted($apiKey);
+                } else {
+                    Log::warning('YouTube API failed, trying Apify fallback', [
+                        'channel' => $channelName,
+                        'error' => $e->getMessage()
+                    ]);
+                }
             }
         }
 
@@ -87,9 +105,12 @@ class ChannelController extends Controller
             }
         }
 
-        Log::warning('Failed to get channel info from both YouTube API and Apify', [
-            'channel' => $channelName
-        ]);
+        // Only log this occasionally to avoid log spam
+        if (rand(1, 10) === 1) { // Log only 10% of failures
+            Log::info('Channel not found in both YouTube API and Apify', [
+                'channel' => $channelName
+            ]);
+        }
     }
 
     private function saveChannelFromApify(string $channelName, array $apifyData, &$existingChannels): void
