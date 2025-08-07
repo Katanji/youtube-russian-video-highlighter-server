@@ -10,6 +10,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 
 class ChannelController extends Controller
 {
@@ -37,7 +38,7 @@ class ChannelController extends Controller
 
         foreach ($missingChannelNames as $channelName) {
             $apiKey = null;
-            
+
             // Try to get YouTube API key if available
             if (!$allKeysExhausted) {
                 $apiKey = $this->youtubeApiKeyService->getAvailableApiKey();
@@ -52,10 +53,6 @@ class ChannelController extends Controller
             } catch (\Exception $e) {
                 if ($e instanceof GuzzleException && $e->getCode() == 403) {
                     $this->youtubeApiKeyService->markKeyAsExhausted($apiKey);
-                    // Only log key exhaustion once per key, not per channel
-                    if (!str_contains($e->getMessage(), 'exceeded your quota')) {
-                        Log::warning('API key limit reached. Key marked as exhausted.', ['exhausted_key' => $apiKey]);
-                    }
                 } else {
                     Log::error('Error processing channel:', ['channelName' => $channelName, 'error' => $e->getMessage()]);
                 }
@@ -75,15 +72,22 @@ class ChannelController extends Controller
             return;
         }
 
+        // Prevent repeated API calls for the same channel within 5 minutes
+        $cacheKey = "processing_channel_{$channelName}";
+        if (Cache::has($cacheKey)) {
+            return;
+        }
+        Cache::put($cacheKey, true, 300); // 5 minutes
+
         // Try YouTube API first (free)
         if (!empty($apiKey)) {
             try {
                 $this->processChannelViaYouTubeApi($channelName, $apiKey, $existingChannels);
                 return;
             } catch (\Exception $e) {
-                // Only log quota exceeded once, not for every channel
-                if (str_contains($e->getMessage(), 'exceeded your quota')) {
-                    // Mark key as exhausted to avoid repeated quota errors
+                // Check if this is a quota exceeded error
+                if (str_contains($e->getMessage(), 'exceeded your quota') ||
+                    str_contains($e->getMessage(), '403 Forbidden')) {
                     $this->youtubeApiKeyService->markKeyAsExhausted($apiKey);
                 } else {
                     Log::warning('YouTube API failed, trying Apify fallback', [
@@ -97,7 +101,7 @@ class ChannelController extends Controller
         // Fallback to Apify if YouTube API failed or no keys available
         if ($this->apifyService->isAvailable()) {
             $apifyData = $this->apifyService->getChannelInfo($channelName);
-            
+
             if ($apifyData && $apifyData['channel_id']) {
                 Log::info('Channel info obtained from Apify (fallback)', ['channel' => $channelName]);
                 $this->saveChannelFromApify($channelName, $apifyData, $existingChannels);
@@ -123,7 +127,7 @@ class ChannelController extends Controller
                 'country_code' => $apifyData['country_code'] ?? null
             ]
         );
-        
+
         $existingChannels->put($channelName, $channel);
     }
 
