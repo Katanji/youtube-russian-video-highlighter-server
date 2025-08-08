@@ -64,7 +64,7 @@ class ChannelController extends Controller
         return response()->json($existingChannels);
     }
 
-    private function processChannel(string $channelName, string $apiKey, &$existingChannels): void
+    private function processChannel(string $channelName, ?string $apiKey, &$existingChannels): void
     {
         $existingChannel = Channel::where('channel_id', $channelName)->first();
         if ($existingChannel) {
@@ -79,7 +79,7 @@ class ChannelController extends Controller
         }
         Cache::put($cacheKey, true, 300); // 5 minutes
 
-        // Try YouTube API first (free)
+        // Try YouTube API first (free) - only if we have a valid API key
         if (!empty($apiKey)) {
             try {
                 $this->processChannelViaYouTubeApi($channelName, $apiKey, $existingChannels);
